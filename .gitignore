@@ -1,0 +1,44 @@
+# ==================== EasyPay — .gitignore ====================
+
+# ── CREDENCIALES (NUNCA al repositorio) ──
+# credenciales.php se agrega manualmente en cada entorno (XAMPP / hosting)
+credenciales.php
+private/
+../private/
+easypay_credentials.php
+credentials.php
+*.env
+.env
+.env.*
+
+# ── LOGS ──
+*.log
+logs/
+php_errors.log
+/logs/
+
+# ── SISTEMA ──
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── PHP ──
+*.bak
+*.tmp
+*.swp
+*~
+
+# ── IDE ──
+.vscode/
+.idea/
+*.code-workspace
+
+# ── TESTS / DEV ──
+test.php
+prueba.php
+debug.php
+phpinfo.php
+
+# ── ARTEFACTOS GENERADOS POR HOSTING ──
+stats/
+/stats/
