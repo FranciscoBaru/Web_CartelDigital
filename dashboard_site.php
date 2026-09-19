@@ -9,7 +9,14 @@ if (!esEstacion()) {
 $site_data = obtenerEstacionPorId($_SESSION['site_id']);
 $petrolera_id = $site_data['petrolera_id'];
 
-$sql_carteles = "SELECT * FROM Cartel WHERE site = ? ORDER BY id DESC";
+// Cartel -> sign_prices. Se aliasan las columnas al nombre que espera el resto
+// del código (precio/lama/estado485/estadovox/fecha/hora).
+$sql_carteles = "SELECT *,
+        price1 AS precio1, price2 AS precio2, price3 AS precio3, price4 AS precio4, price5 AS precio5,
+        linea1 AS lama1, linea2 AS lama2, linea3 AS lama3, linea4 AS lama4, linea5 AS lama5,
+        est_485 AS estado485, est_cont AS estadovox,
+        to_char(updated_at, 'YYYY-MM-DD') AS fecha, to_char(updated_at, 'HH24:MI:SS') AS hora
+    FROM sign_prices WHERE site = ? ORDER BY id DESC";
 $stmt = $conn->prepare($sql_carteles);
 $stmt->bind_param("i", $site_data['site']);
 $stmt->execute();
@@ -17,17 +24,19 @@ $carteles = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
 
 if (empty($carteles)) {
-    $def_mac = '00:00:00:00:00:00';
-    $stmt_ins = $conn->prepare("INSERT INTO Cartel (site, MAC, fecha, hora, estado485, estadovox) VALUES (?, ?, NOW(), NOW(), 0, 0)");
-    $stmt_ins->bind_param("is", $site_data['site'], $def_mac);
-    $stmt_ins->execute();
-    $stmt_ins->close();
-    // Volver a cargar
-    $stmt = $conn->prepare($sql_carteles);
-    $stmt->bind_param("i", $site_data['site']);
-    $stmt->execute();
-    $carteles = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-    $stmt->close();
+    // La estación no tiene ningún cartel (sign_prices) asociado. Se usa un
+    // placeholder en memoria para renderizar la vista sin insertar filas
+    // ficticias (mac es UNIQUE en sign_prices).
+    $placeholder = [
+        'id' => 0, 'MAC' => '00:00:00:00:00:00', 'IP_LAN' => '',
+        'fecha' => null, 'hora' => null, 'estado485' => 0, 'estadovox' => 0,
+    ];
+    for ($i = 1; $i <= 5; $i++) {
+        $placeholder['idproducto' . $i] = 0;
+        $placeholder['precio' . $i] = 0;
+        $placeholder['lama' . $i] = '';
+    }
+    $carteles = [$placeholder];
 }
 
 $cartel_seleccionado_id = isset($_GET['cartel_id']) ? intval($_GET['cartel_id']) : ($carteles[0]['id'] ?? 0);
@@ -43,7 +52,7 @@ if (!$cartel_activo && !empty($carteles)) {
 }
 
 // Optimización: obtener estado WFT de una sola vez para todos los carteles
-$macs = array_column($carteles, 'MAC');
+$macs = db_column($carteles, 'MAC');
 $estados_wft = obtenerEstadosWFTMultiples($macs);
 $comunicacion = $estados_wft[$cartel_activo['MAC']] ?? 'Error';
 
@@ -82,7 +91,6 @@ $refresh_url = "?cartel_id=" . $cartel_activo['id'];
             <h2><i class="bi bi-building me-2"></i> Panel de Estación</h2>
             <div>
                 <a href="usuario_eess.php" class="btn btn-outline-warning me-2"><i class="bi bi-people me-2"></i> Gestión de Usuarios</a>
-                <a href="reportes.php" class="btn btn-outline-warning me-2"><i class="bi bi-bar-chart-line me-2"></i> Reportes</a>
                 <a href="perfil_estacion.php" class="btn btn-outline-warning"><i class="bi bi-person-circle me-2"></i> Mi Perfil</a>
             </div>
         </div>

@@ -6,7 +6,10 @@ if (!esUsuario() || $_SESSION['user_rol'] != 9) {
     exit('Acceso denegado');
 }
 header('Content-Type: application/json');
-$result = $conn_clientes->query("SELECT id, Nombre, Usuario, Email, DNI, rol, Petrolera, email_verified FROM Usuarios ORDER BY id");
+// Se aliasan las columnas con comillas para que el JSON conserve las mayúsculas
+// que espera el JS del panel (u.Nombre, u.Usuario, u.Email, u.DNI, u.Petrolera);
+// PostgreSQL, sin comillas, las devolvería en minúscula.
+$result = $conn_clientes->query("SELECT id, nombre AS \"Nombre\", usuario AS \"Usuario\", email AS \"Email\", dni AS \"DNI\", rol, petrolera AS \"Petrolera\", email_verified FROM Usuarios ORDER BY id");
 if (!$result) {
     http_response_code(500);
     echo json_encode(['error' => 'Error en consulta']);

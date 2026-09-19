@@ -19,7 +19,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             $error = 'Email inválido.';
         } else {
-            $check_cartel = $conn->prepare("SELECT id FROM Cartel WHERE MAC = ?");
+            $check_cartel = $conn->prepare("SELECT id FROM sign_prices WHERE mac = ?");
             $check_cartel->bind_param("s", $mac);
             $check_cartel->execute();
             $cartel_exists = $check_cartel->get_result()->num_rows > 0;

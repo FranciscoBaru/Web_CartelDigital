@@ -58,10 +58,10 @@ if (!empty($user_dni_normalizado)) {
 $stations = [];
 if (!empty($where_parts)) {
     $sql = "SELECT s.site as apies, s.nombre, s.petrolera_id, s.localidad, s.provincia,
-                   (SELECT c.estado485 FROM Cartel c WHERE c.site = s.site ORDER BY c.id DESC LIMIT 1) as estado485,
-                   (SELECT c.estadovox FROM Cartel c WHERE c.site = s.site ORDER BY c.id DESC LIMIT 1) as estadovox,
-                   (SELECT CONCAT(c.fecha, ' ', c.hora) FROM Cartel c WHERE c.site = s.site ORDER BY c.id DESC LIMIT 1) as ultima_actualizacion,
-                   (SELECT c.MAC FROM Cartel c WHERE c.site = s.site ORDER BY c.id DESC LIMIT 1) as mac
+                   (SELECT c.est_485 FROM sign_prices c WHERE c.site = s.site ORDER BY c.id DESC LIMIT 1) as estado485,
+                   (SELECT c.est_cont FROM sign_prices c WHERE c.site = s.site ORDER BY c.id DESC LIMIT 1) as estadovox,
+                   (SELECT to_char(c.updated_at, 'YYYY-MM-DD HH24:MI:SS') FROM sign_prices c WHERE c.site = s.site ORDER BY c.id DESC LIMIT 1) as ultima_actualizacion,
+                   (SELECT c.mac FROM sign_prices c WHERE c.site = s.site ORDER BY c.id DESC LIMIT 1) as mac
             FROM sites s
             WHERE " . implode(' OR ', $where_parts) . "
             ORDER BY s.nombre";
@@ -83,7 +83,12 @@ foreach ($stations as $s) {
 
 $cartel_activo = null;
 if ($selected_station) {
-    $stmt = $conn->prepare("SELECT * FROM Cartel WHERE site = ? ORDER BY id DESC LIMIT 1");
+    $stmt = $conn->prepare("SELECT *,
+            price1 AS precio1, price2 AS precio2, price3 AS precio3, price4 AS precio4, price5 AS precio5,
+            linea1 AS lama1, linea2 AS lama2, linea3 AS lama3, linea4 AS lama4, linea5 AS lama5,
+            est_485 AS estado485, est_cont AS estadovox,
+            to_char(updated_at, 'YYYY-MM-DD') AS fecha, to_char(updated_at, 'HH24:MI:SS') AS hora
+        FROM sign_prices WHERE site = ? ORDER BY id DESC LIMIT 1");
     $stmt->bind_param("i", $selected_site);
     $stmt->execute();
     $cartel_activo = $stmt->get_result()->fetch_assoc();

@@ -35,83 +35,33 @@ if (ENVIRONMENT === 'development') {
 ini_set('log_errors', 1);
 ini_set('error_log', __DIR__ . '/php_errors.log');
 
-// ==================== CONEXIONES A BASE DE DATOS ====================
-// Base de datos principal (CARTELES)
-$conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
+// ==================== CONEXIÓN A BASE DE DATOS (PostgreSQL) ====================
+// Toda la aplicación usa una única base PostgreSQL mediante la capa de
+// compatibilidad db_pg.php, que mantiene la API estilo mysqli (prepare,
+// bind_param, get_result, fetch_assoc, etc.).
+require_once __DIR__ . '/db_pg.php';
+
+$conn = new PgConnection(DB_HOST, DB_USER, DB_PASS, DB_NAME, defined('DB_PORT') ? DB_PORT : 5432);
 if ($conn->connect_error) {
-    error_log("Error conexión CARTELES: " . $conn->connect_error);
+    error_log("Error conexión PostgreSQL: " . $conn->connect_error);
     die("Error de conexión a la base de datos. Contacte al administrador.");
 }
-$conn->set_charset("utf8mb4");
+$conn->set_charset("utf8mb4"); // no-op en PostgreSQL (el charset se fija en la conexión)
 
-// Base de datos CLIENTES
-$conn_clientes = new mysqli(CLIENTES_DB_HOST, CLIENTES_DB_USER, CLIENTES_DB_PASS, CLIENTES_DB_NAME);
-if ($conn_clientes->connect_error) {
-    error_log("Error conexión CLIENTES: " . $conn_clientes->connect_error);
-    die("Error de conexión a la base de datos de clientes. Contacte al administrador.");
-}
-$conn_clientes->set_charset("utf8mb4");
+// Las tablas que antes vivían en la base CLIENTES (usuarios, roles, relaciones,
+// pendientes_registro, password_resets, password_reset_attempts, log_cambios)
+// ahora están en el mismo PostgreSQL. $conn_clientes queda como ALIAS de $conn
+// para no reescribir cada consulta.
+$conn_clientes = $conn;
 
 // PHPMailer se carga bajo demanda desde functions.php al enviar correos.
 
-// ==================== INICIALIZACIÓN DE TABLAS (CARTELES) ====================
-function crearTablasSistema() {
-    global $conn, $conn_clientes;
-    
-    // Tabla Productos
-    $conn->query("CREATE TABLE IF NOT EXISTS Productos (
-        idproducto INT NOT NULL,
-        petrolera_id INT NOT NULL,
-        nombre VARCHAR(100) NOT NULL,
-        PRIMARY KEY (idproducto, petrolera_id),
-        FOREIGN KEY (petrolera_id) REFERENCES Petroleras(id) ON DELETE CASCADE
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-    
-    // Tabla password_resets (usuarios CLIENTES)
-    $conn_clientes->query("CREATE TABLE IF NOT EXISTS password_resets (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        email VARCHAR(255) NOT NULL,
-        token VARCHAR(255) NOT NULL,
-        expires_at DATETIME NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_token (token),
-        INDEX idx_email (email)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-    
-    // Tabla password_resets_sites (estaciones)
-    $conn->query("CREATE TABLE IF NOT EXISTS password_resets_sites (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        site INT NOT NULL,
-        email VARCHAR(255) NOT NULL,
-        token VARCHAR(255) NOT NULL,
-        expires_at DATETIME NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_token (token),
-        INDEX idx_site (site)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-    
-    // Tabla para rate limiting de recuperación de contraseña
-    $conn_clientes->query("CREATE TABLE IF NOT EXISTS password_reset_attempts (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        email VARCHAR(255) NOT NULL,
-        ip VARCHAR(45) NOT NULL,
-        attempted_at DATETIME NOT NULL,
-        INDEX idx_email_ip (email, ip),
-        INDEX idx_attempted (attempted_at)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+// ==================== INICIALIZACIÓN DE TABLAS ====================
+// La creación de tablas ya no se hace desde la aplicación: el esquema vive en
+// PostgreSQL y se administra con el script migracion_carteles_a_postgres.sql.
+// (Antes se ejecutaba DDL de MySQL en cada request; se eliminó.)
 
-    $conn->query("CREATE TABLE IF NOT EXISTS password_reset_attempts (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        email VARCHAR(255) NOT NULL,
-        ip VARCHAR(45) NOT NULL,
-        attempted_at DATETIME NOT NULL,
-        INDEX idx_email_ip (email, ip),
-        INDEX idx_attempted (attempted_at)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-}
-crearTablasSistema();
-
-// Cargar productos por defecto si es necesario
+// Cargar productos por defecto si es necesario (solo si la tabla quedara vacía)
 function cargarProductosPorDefecto() {
     global $conn;
     $result = $conn->query("SELECT COUNT(*) as total FROM Productos");
@@ -121,7 +71,7 @@ function cargarProductosPorDefecto() {
         foreach ($petroleras as $pet) {
             $pet_id = $pet['id'];
             foreach ($productos_reales as $idprod => $nombre) {
-                $stmt = $conn->prepare("INSERT IGNORE INTO Productos (idproducto, petrolera_id, nombre) VALUES (?, ?, ?)");
+                $stmt = $conn->prepare("INSERT INTO Productos (idproducto, petrolera_id, nombre) VALUES (?, ?, ?) ON CONFLICT DO NOTHING");
                 if ($stmt) {
                     $stmt->bind_param("iis", $idprod, $pet_id, $nombre);
                     $stmt->execute();
@@ -242,7 +192,11 @@ function verificarTokenCSRF($token) {
 
 // Respaldo de autenticación para hostings donde PHPSESSID no persiste correctamente.
 function obtenerClaveCookieAutenticacion() {
-    return hash('sha256', DB_NAME . '|' . DB_USER . '|' . CLIENTES_DB_NAME . '|' . CLIENTES_DB_PASS . '|' . __DIR__);
+    // CLIENTES_DB_* ya no se usan para conexión (base unificada en PostgreSQL), pero
+    // se mantienen en la clave si siguen definidas para no invalidar cookies vigentes.
+    $clientes_name = defined('CLIENTES_DB_NAME') ? CLIENTES_DB_NAME : '';
+    $clientes_pass = defined('CLIENTES_DB_PASS') ? CLIENTES_DB_PASS : '';
+    return hash('sha256', DB_NAME . '|' . DB_USER . '|' . $clientes_name . '|' . $clientes_pass . '|' . __DIR__);
 }
 
 function codificarBase64Url($value) {

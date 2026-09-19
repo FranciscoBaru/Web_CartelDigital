@@ -19,8 +19,31 @@ $action = $_REQUEST['action'] ?? '';
 $table = $_REQUEST['table'] ?? '';
 $id = $_REQUEST['id'] ?? 0;
 
-// Tablas permitidas
-$allowedTables = ['sites', 'usuarios', 'cartel', 'dispositivos', 'logs', 'roles', 'petroleras'];
+// Tablas permitidas ('dispositivos'/IOT retirado)
+$allowedTables = ['sites', 'usuarios', 'cartel', 'logs', 'roles', 'petroleras'];
+
+// Traduce los nombres de columna del "cartel" (nombres históricos) a los de
+// sign_prices. Las columnas sin equivalente directo (fecha/hora) se descartan.
+function traducirColumnasCartel(array $data) {
+    $map = [
+        'precio1' => 'price1', 'precio2' => 'price2', 'precio3' => 'price3', 'precio4' => 'price4', 'precio5' => 'price5',
+        'lama1'   => 'linea1', 'lama2'   => 'linea2', 'lama3'   => 'linea3', 'lama4'   => 'linea4', 'lama5'   => 'linea5',
+        'estado485' => 'est_485', 'estadovox' => 'est_cont',
+        'MAC' => 'mac', 'IP_LAN' => 'ip_lan',
+    ];
+    $out = [];
+    foreach ($data as $k => $v) {
+        if (isset($map[$k])) {
+            $out[$map[$k]] = $v;
+        } elseif (in_array($k, ['fecha', 'hora'], true)) {
+            // sin equivalente directo en sign_prices (updated_at se maneja aparte)
+            continue;
+        } else {
+            $out[$k] = $v; // site, idproducto1..5, etc. quedan igual
+        }
+    }
+    return $out;
+}
 if (!in_array($table, $allowedTables)) {
     echo json_encode(['error' => 'Tabla no permitida']);
     exit;
@@ -58,19 +81,21 @@ try {
                 $data = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
                 echo json_encode(['data' => $data]);
             } elseif ($table === 'usuarios') {
-                $result = $conn_clientes->query("SELECT u.*, r.rol as rol_nombre FROM Usuarios u LEFT JOIN roles r ON u.rol = r.id");
+                // Se aliasan las columnas al nombre (con mayúsculas) que espera el
+                // JS del panel (u.Nombre, u.Usuario, u.Email, u.DNI, u.Petrolera),
+                // porque PostgreSQL las devuelve en minúscula y el JSON iría con esas claves.
+                $result = $conn_clientes->query("SELECT u.id, u.nombre AS \"Nombre\", u.usuario AS \"Usuario\", u.email AS \"Email\", u.dni AS \"DNI\", u.rol, u.petrolera AS \"Petrolera\", u.email_verified, u.telefono, u.provincia, r.rol AS rol_nombre FROM Usuarios u LEFT JOIN roles r ON u.rol = r.id");
                 $data = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
                 echo json_encode(['data' => $data]);
             } elseif ($table === 'cartel') {
-                $result = $conn->query("SELECT * FROM Cartel ORDER BY id DESC");
+                $result = $conn->query("SELECT *,
+                        price1 AS precio1, price2 AS precio2, price3 AS precio3, price4 AS precio4, price5 AS precio5,
+                        linea1 AS lama1, linea2 AS lama2, linea3 AS lama3, linea4 AS lama4, linea5 AS lama5,
+                        est_485 AS estado485, est_cont AS estadovox,
+                        to_char(updated_at, 'YYYY-MM-DD') AS fecha, to_char(updated_at, 'HH24:MI:SS') AS hora
+                    FROM sign_prices ORDER BY id DESC");
                 $data = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
                 echo json_encode(['data' => $data]);
-            } elseif ($table === 'dispositivos') {
-                $conn_iot = new mysqli(IOT_DB_HOST, IOT_DB_USER, IOT_DB_PASS, IOT_DB_NAME);
-                $result = $conn_iot->query("SELECT * FROM Dispositivos ORDER BY id DESC");
-                $data = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
-                echo json_encode(['data' => $data]);
-                $conn_iot->close();
             } elseif ($table === 'logs') {
                 $result = $conn_clientes->query("SELECT * FROM log_cambios ORDER BY id DESC LIMIT 500");
                 $data = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
@@ -122,7 +147,18 @@ try {
                 echo json_encode(['error' => 'No se enviaron datos válidos']);
                 exit;
             }
-            
+
+            // El "cartel" del panel se persiste en la tabla sign_prices.
+            $sqlTable = $table;
+            if ($table === 'cartel') {
+                $sqlTable = 'sign_prices';
+                $data = traducirColumnasCartel($data);
+                if (empty($data)) {
+                    echo json_encode(['error' => 'No se enviaron datos válidos']);
+                    exit;
+                }
+            }
+
             if ($action === 'update') {
                 // Obtener datos antiguos para log
                 $oldData = [];
@@ -151,18 +187,11 @@ try {
                 }
                 $params[] = $id;
                 $types .= 'i';
-                $sql = "UPDATE $table SET " . implode(', ', $fields) . " WHERE id = ?";
-                
-                // Seleccionar conexión correcta
-                if ($table === 'usuarios' || $table === 'logs' || $table === 'roles') {
-                    $stmt = $conn_clientes->prepare($sql);
-                } elseif ($table === 'dispositivos') {
-                    $conn_iot = new mysqli(IOT_DB_HOST, IOT_DB_USER, IOT_DB_PASS, IOT_DB_NAME);
-                    $stmt = $conn_iot->prepare($sql);
-                } else {
-                    $stmt = $conn->prepare($sql);
-                }
-                
+                $sql = "UPDATE $sqlTable SET " . implode(', ', $fields) . " WHERE id = ?";
+
+                // Todas las tablas viven ahora en la misma base PostgreSQL ($conn).
+                $stmt = $conn->prepare($sql);
+
                 if ($stmt) {
                     $stmt->bind_param($types, ...$params);
                     $success = $stmt->execute();
@@ -180,28 +209,20 @@ try {
                 } else {
                     echo json_encode(['success' => false, 'message' => 'Error preparando consulta']);
                 }
-                if ($table === 'dispositivos') $conn_iot->close();
             } else { // insert
                 $fields = array_keys($data);
                 $placeholders = implode(',', array_fill(0, count($fields), '?'));
-                $sql = "INSERT INTO $table (" . implode(',', $fields) . ") VALUES ($placeholders)";
-                
-                // Seleccionar conexión
-                if ($table === 'usuarios' || $table === 'logs' || $table === 'roles') {
-                    $stmt = $conn_clientes->prepare($sql);
-                } elseif ($table === 'dispositivos') {
-                    $conn_iot = new mysqli(IOT_DB_HOST, IOT_DB_USER, IOT_DB_PASS, IOT_DB_NAME);
-                    $stmt = $conn_iot->prepare($sql);
-                } else {
-                    $stmt = $conn->prepare($sql);
-                }
-                
+                $sql = "INSERT INTO $sqlTable (" . implode(',', $fields) . ") VALUES ($placeholders)";
+
+                // Todas las tablas viven ahora en la misma base PostgreSQL ($conn).
+                $stmt = $conn->prepare($sql);
+
                 if ($stmt) {
                     $types = str_repeat('s', count($fields));
                     $stmt->bind_param($types, ...array_values($data));
                     $success = $stmt->execute();
                     if ($success) {
-                        $newId = ($table === 'usuarios') ? $conn_clientes->insert_id : $conn->insert_id;
+                        $newId = $conn->insert_id;
                         foreach ($data as $key => $value) {
                             registrarLog($table, $key, null, $value, $usuario_actual);
                         }
@@ -213,21 +234,17 @@ try {
                 } else {
                     echo json_encode(['success' => false, 'message' => 'Error preparando consulta']);
                 }
-                if ($table === 'dispositivos') $conn_iot->close();
             }
             break;
 
         case 'delete':
             // Usar prepared statement
             if ($table === 'usuarios') {
-                $stmt = $conn_clientes->prepare("DELETE FROM Usuarios WHERE id = ?");
+                $stmt = $conn->prepare("DELETE FROM Usuarios WHERE id = ?");
             } elseif ($table === 'sites') {
                 $stmt = $conn->prepare("DELETE FROM sites WHERE id = ?");
             } elseif ($table === 'cartel') {
-                $stmt = $conn->prepare("DELETE FROM Cartel WHERE id = ?");
-            } elseif ($table === 'dispositivos') {
-                $conn_iot = new mysqli(IOT_DB_HOST, IOT_DB_USER, IOT_DB_PASS, IOT_DB_NAME);
-                $stmt = $conn_iot->prepare("DELETE FROM Dispositivos WHERE id = ?");
+                $stmt = $conn->prepare("DELETE FROM sign_prices WHERE id = ?");
             } else {
                 echo json_encode(['error' => 'Eliminación no soportada para esta tabla']);
                 exit;
@@ -244,7 +261,6 @@ try {
             } else {
                 echo json_encode(['success' => false, 'message' => 'Error preparando consulta']);
             }
-            if ($table === 'dispositivos') $conn_iot->close();
             break;
 
         default:

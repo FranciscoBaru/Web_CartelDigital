@@ -9,7 +9,9 @@ if (!esEstacion()) {
 $site_id = $_SESSION['site_id'];
 $site_data = obtenerEstacionPorId($site_id);
 
-$sql_carteles = "SELECT id, MAC, IP_LAN, estado485, estadovox, fecha, hora FROM Cartel WHERE site = ? ORDER BY id DESC";
+$sql_carteles = "SELECT id, mac, ip_lan, est_485 AS estado485, est_cont AS estadovox,
+        to_char(updated_at, 'YYYY-MM-DD') AS fecha, to_char(updated_at, 'HH24:MI:SS') AS hora
+    FROM sign_prices WHERE site = ? ORDER BY id DESC";
 $stmt = $conn->prepare($sql_carteles);
 $stmt->bind_param("i", $site_data['site']);
 $stmt->execute();
@@ -106,7 +108,7 @@ foreach ($petroleras as $p) {
         break;
     }
 }
-$estados_wft = obtenerEstadosWFTMultiples(array_column($carteles, 'MAC'));
+$estados_wft = obtenerEstadosWFTMultiples(db_column($carteles, 'MAC'));
 ?>
 <?php include 'header.php'; ?>
 <style>

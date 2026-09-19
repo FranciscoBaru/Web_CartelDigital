@@ -11,14 +11,15 @@ $petroleras = obtenerPetroleras();
 // Obtener todas las estaciones excluyendo site 9999
 $sql_all = "SELECT s.site, s.nombre, s.domicilio, s.localidad, s.provincia, s.telefono, s.email, s.cuit, s.petrolera_id,
                s.Fecha, s.hora,
-               c.MAC, c.IP_LAN, c.estado485, c.estadovox, c.precio1, c.precio2, c.precio3, c.precio4, c.precio5,
+               c.mac, c.ip_lan, c.est_485 AS estado485, c.est_cont AS estadovox,
+               c.price1 AS precio1, c.price2 AS precio2, c.price3 AS precio3, c.price4 AS precio4, c.price5 AS precio5,
                c.idproducto1, c.idproducto2, c.idproducto3, c.idproducto4, c.idproducto5,
-               CONCAT(c.fecha, ' ', c.hora) as ultima_actualizacion
+               to_char(c.updated_at, 'YYYY-MM-DD HH24:MI:SS') as ultima_actualizacion
         FROM sites s
         LEFT JOIN (
-            SELECT site, MAX(id) as max_id FROM Cartel GROUP BY site
+            SELECT site, MAX(id) as max_id FROM sign_prices GROUP BY site
         ) cm ON s.site = cm.site
-        LEFT JOIN Cartel c ON cm.max_id = c.id
+        LEFT JOIN sign_prices c ON cm.max_id = c.id
         WHERE s.site != 9999
         ORDER BY s.site";
 $stmt_all = $conn->prepare($sql_all);
@@ -26,31 +27,14 @@ $stmt_all->execute();
 $all_stations = $stmt_all->get_result()->fetch_all(MYSQLI_ASSOC);
 $stmt_all->close();
 
-// Firmware desde IOT
-$macs = array_filter(array_column($all_stations, 'MAC'));
+$macs = array_filter(db_column($all_stations, 'MAC'));
+// Firmware: el módulo IOT (tabla Dispositivos, MySQL) se retiró al apagar MySQL.
+// Se deja el firmware como 'N/A'.
 $firmware_map = [];
-if (!empty($macs)) {
-    $conn_iot = new mysqli(IOT_DB_HOST, IOT_DB_USER, IOT_DB_PASS, IOT_DB_NAME);
-    if (!$conn_iot->connect_error) {
-        $placeholders = implode(',', array_fill(0, count($macs), '?'));
-        $sql_fw = "SELECT MAC, firmware FROM Dispositivos WHERE MAC IN ($placeholders)";
-        $stmt_fw = $conn_iot->prepare($sql_fw);
-        if ($stmt_fw) {
-            $types = str_repeat('s', count($macs));
-            $stmt_fw->bind_param($types, ...$macs);
-            $stmt_fw->execute();
-            $result_fw = $stmt_fw->get_result();
-            while ($row = $result_fw->fetch_assoc()) {
-                $firmware_map[$row['MAC']] = $row['firmware'];
-            }
-            $stmt_fw->close();
-        }
-        $conn_iot->close();
-    }
-}
 foreach ($all_stations as &$s) {
     $s['firmware'] = $firmware_map[$s['MAC']] ?? 'N/A';
 }
+unset($s);
 unset($s);
 
 // Estados WFT en lote
@@ -109,7 +93,12 @@ foreach ($filtered_stations as $s) {
 }
 
 // Consulta para carteles sin registrar (site = 9999)
-$sql_unregistered = "SELECT * FROM Cartel WHERE site = 9999 ORDER BY MAC";
+$sql_unregistered = "SELECT *,
+        price1 AS precio1, price2 AS precio2, price3 AS precio3, price4 AS precio4, price5 AS precio5,
+        linea1 AS lama1, linea2 AS lama2, linea3 AS lama3, linea4 AS lama4, linea5 AS lama5,
+        est_485 AS estado485, est_cont AS estadovox,
+        to_char(updated_at, 'YYYY-MM-DD') AS fecha, to_char(updated_at, 'HH24:MI:SS') AS hora
+    FROM sign_prices WHERE site = 9999 ORDER BY mac";
 $result_unreg = $conn->query($sql_unregistered);
 $unregistered_carteles = $result_unreg ? $result_unreg->fetch_all(MYSQLI_ASSOC) : [];
 

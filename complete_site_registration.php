@@ -76,7 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     $sql_upd_site = "UPDATE sites SET 
                                         site = ?, nombre = ?, petrolera_id = ?, domicilio = ?, localidad = ?, 
                                         provincia = ?, telefono = ?, cuit = ?, email = ?, password = ?, 
-                                        updated_at = NOW(), email_verified = 1, Fecha = CURDATE(), hora = CURTIME()
+                                        updated_at = NOW(), email_verified = 1, Fecha = CURRENT_DATE, hora = LOCALTIME
                                     WHERE MAC = ?";
                     $stmt_upd = $conn->prepare($sql_upd_site);
                     $stmt_upd->bind_param("isississsss", 
@@ -90,7 +90,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     $sql_ins_site = "INSERT INTO sites (
                         site, nombre, petrolera_id, domicilio, localidad, provincia, telefono, cuit, email, password, 
                         created_at, updated_at, MAC, email_verified, Fecha, hora
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), ?, 1, CURDATE(), CURTIME())";
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), ?, 1, CURRENT_DATE, LOCALTIME)";
                     $stmt_ins = $conn->prepare($sql_ins_site);
                     $stmt_ins->bind_param("isississsss", 
                         $nuevo_site, $nombre, $petrolera_id, $domicilio, $localidad, $provincia, $telefono, $cuit, 
@@ -101,32 +101,16 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 }
 
                 if ($insert_ok) {
-                    // 1. Actualizar Cartel
-                    $sql_upd_cartel = "UPDATE Cartel SET site = ? WHERE MAC = ?";
+                    // 1. Actualizar el cartel (sign_prices): asignar el APIES a la MAC.
+                    //    Se marca reset = 1 para que el dispositivo tome la nueva config
+                    //    (equivalente a lo que antes hacía el módulo IOT, ahora retirado).
+                    $sql_upd_cartel = "UPDATE sign_prices SET site = ?, reset = 1 WHERE mac = ?";
                     $stmt_cart = $conn->prepare($sql_upd_cartel);
                     $stmt_cart->bind_param("is", $nuevo_site, $mac);
                     $stmt_cart->execute();
                     $stmt_cart->close();
 
-                    // 2. Actualizar IOT.Dispositivos (site + reset=1)
-                    $conn_iot = @new mysqli(IOT_DB_HOST, IOT_DB_USER, IOT_DB_PASS, IOT_DB_NAME);
-                    if (!$conn_iot->connect_error) {
-                        $descripcion = 'Cartel ' . $nombre;
-                        $sql_iot = "UPDATE Dispositivos SET site = ?, Producto = 'Cartel de precios', Descripcion = ?, Dispositivo = 'Cartel STILUX', reset = 1 WHERE MAC = ?";
-                        $stmt_iot = $conn_iot->prepare($sql_iot);
-                        if ($stmt_iot) {
-                            $stmt_iot->bind_param("iss", $nuevo_site, $descripcion, $mac);
-                            if (!$stmt_iot->execute()) {
-                                $warning .= " No se pudo actualizar IOT: " . $stmt_iot->error;
-                            }
-                            $stmt_iot->close();
-                        } else {
-                            $warning .= " No se pudo preparar consulta IOT.";
-                        }
-                        $conn_iot->close();
-                    } else {
-                        $warning .= " No se pudo conectar a IOT.";
-                    }
+                    // (Módulo IOT/Dispositivos retirado al apagar MySQL.)
 
                     // Eliminar pendiente
                     $del = $conn_clientes->prepare("DELETE FROM pendientes_registro WHERE MAC = ?");

@@ -48,7 +48,12 @@ function obtenerEstacionPorId($id) {
 
 function obtenerCartelPorSite($site_numero) {
     global $conn;
-    $stmt = $conn->prepare("SELECT * FROM Cartel WHERE site = ? ORDER BY id DESC LIMIT 1");
+    $stmt = $conn->prepare("SELECT *,
+            price1 AS precio1, price2 AS precio2, price3 AS precio3, price4 AS precio4, price5 AS precio5,
+            linea1 AS lama1, linea2 AS lama2, linea3 AS lama3, linea4 AS lama4, linea5 AS lama5,
+            est_485 AS estado485, est_cont AS estadovox,
+            to_char(updated_at, 'YYYY-MM-DD') AS fecha, to_char(updated_at, 'HH24:MI:SS') AS hora
+        FROM sign_prices WHERE site = ? ORDER BY id DESC LIMIT 1");
     $stmt->bind_param("i", $site_numero);
     $stmt->execute();
     return $stmt->get_result()->fetch_assoc();
@@ -100,19 +105,20 @@ function obtenerProductosPorPetrolera($petrolera_id) {
 }
 
 // ==================== ESTADO WFT OPTIMIZADO ====================
+// La tabla "poleo" no se migró a PostgreSQL. El estado online (WFT) se calcula
+// a partir de sign_prices.updated_at (última vez que el cartel reportó): si el
+// último contacto es de hace más de 15 minutos, se considera "Error".
 function obtenerEstadoWFT($mac) {
     global $conn;
     if (empty($mac)) return 'Error';
-    $stmt = $conn->prepare("SELECT CONCAT(fecha, ' ', hora) as last_time FROM poleo WHERE MAC = ? ORDER BY fecha DESC, hora DESC LIMIT 1");
+    $stmt = $conn->prepare("SELECT updated_at FROM sign_prices WHERE mac = ? LIMIT 1");
     $stmt->bind_param("s", $mac);
     $stmt->execute();
     $result = $stmt->get_result();
     $row = $result->fetch_assoc();
     $stmt->close();
-    if (!$row) return 'Error (sin registro)';
-    $last_time = $row['last_time'];
-    $last_datetime = DateTime::createFromFormat('Y-m-d H:i:s', $last_time);
-    if (!$last_datetime) $last_datetime = DateTime::createFromFormat('d/m/Y H:i:s', $last_time);
+    if (!$row || empty($row['updated_at'])) return 'Error (sin registro)';
+    $last_datetime = date_create((string) $row['updated_at']);
     if (!$last_datetime) return 'Error (formato fecha)';
     $now = new DateTime();
     $diff = $now->getTimestamp() - $last_datetime->getTimestamp();
@@ -123,10 +129,7 @@ function obtenerEstadosWFTMultiples($macs) {
     global $conn;
     if (empty($macs)) return [];
     $placeholders = implode(',', array_fill(0, count($macs), '?'));
-    $sql = "SELECT MAC, MAX(CONCAT(fecha, ' ', hora)) as last_time 
-            FROM poleo 
-            WHERE MAC IN ($placeholders) 
-            GROUP BY MAC";
+    $sql = "SELECT mac, updated_at FROM sign_prices WHERE mac IN ($placeholders)";
     $stmt = $conn->prepare($sql);
     if (!$stmt) return [];
     $types = str_repeat('s', count($macs));
@@ -136,19 +139,19 @@ function obtenerEstadosWFTMultiples($macs) {
     $estados = [];
     $now = new DateTime();
     while ($row = $result->fetch_assoc()) {
-        $last_time = $row['last_time'];
-        if (!$last_time) {
-            $estados[$row['MAC']] = 'Error';
+        $mac = $row['mac'];
+        $last = $row['updated_at'] ?? null;
+        if (empty($last)) {
+            $estados[$mac] = 'Error';
             continue;
         }
-        $last_datetime = DateTime::createFromFormat('Y-m-d H:i:s', $last_time);
-        if (!$last_datetime) $last_datetime = DateTime::createFromFormat('d/m/Y H:i:s', $last_time);
+        $last_datetime = date_create((string) $last);
         if (!$last_datetime) {
-            $estados[$row['MAC']] = 'Error';
+            $estados[$mac] = 'Error';
             continue;
         }
         $diff = $now->getTimestamp() - $last_datetime->getTimestamp();
-        $estados[$row['MAC']] = ($diff > 15 * 60) ? 'Error' : 'OK';
+        $estados[$mac] = ($diff > 15 * 60) ? 'Error' : 'OK';
     }
     $stmt->close();
     foreach ($macs as $mac) {
@@ -363,11 +366,11 @@ function enviarEmailRecuperacionUsuario($email, $nombre) {
     global $conn_clientes;
     // Rate limiting
     $ip = $_SERVER['REMOTE_ADDR'];
-    $stmt = $conn_clientes->prepare("DELETE FROM password_reset_attempts WHERE attempted_at < DATE_SUB(NOW(), INTERVAL 1 HOUR)");
+    $stmt = $conn_clientes->prepare("DELETE FROM password_reset_attempts WHERE attempted_at < (NOW() - INTERVAL '1 hour')");
     $stmt->execute();
     $stmt->close();
     
-    $stmt = $conn_clientes->prepare("SELECT COUNT(*) as attempts FROM password_reset_attempts WHERE (email = ? OR ip = ?) AND attempted_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)");
+    $stmt = $conn_clientes->prepare("SELECT COUNT(*) as attempts FROM password_reset_attempts WHERE (email = ? OR ip = ?) AND attempted_at > (NOW() - INTERVAL '1 hour')");
     $stmt->bind_param("ss", $email, $ip);
     $stmt->execute();
     $result = $stmt->get_result();
@@ -440,7 +443,7 @@ function enviarEmailRecuperacionEstacion($site_numero, $email, $nombre) {
         return false;
     }
 
-    $stmt = $conn->prepare("DELETE FROM password_reset_attempts WHERE attempted_at < DATE_SUB(NOW(), INTERVAL 1 HOUR)");
+    $stmt = $conn->prepare("DELETE FROM password_reset_attempts WHERE attempted_at < (NOW() - INTERVAL '1 hour')");
     if ($stmt) {
         $stmt->execute();
         $stmt->close();
@@ -448,7 +451,7 @@ function enviarEmailRecuperacionEstacion($site_numero, $email, $nombre) {
         error_log("No se pudo limpiar rate limit de estaciones: " . $conn->error);
     }
 
-    $stmt = $conn->prepare("SELECT COUNT(*) as attempts FROM password_reset_attempts WHERE (email = ? OR ip = ?) AND attempted_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)");
+    $stmt = $conn->prepare("SELECT COUNT(*) as attempts FROM password_reset_attempts WHERE (email = ? OR ip = ?) AND attempted_at > (NOW() - INTERVAL '1 hour')");
     if ($stmt) {
         $stmt->bind_param("ss", $email, $ip);
         $stmt->execute();
