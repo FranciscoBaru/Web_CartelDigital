@@ -138,11 +138,9 @@ $refresh_url = "?site=" . $selected_site;
                         <?php
                         $productos_mostrados = 0;
                         for ($i = 1; $i <= 5; $i++):
-                            $idproducto = (int) ($cartel_activo['idproducto'.$i] ?? 0);
-                            if ($idproducto === 0) continue;
-
-                            $nombre_producto = obtenerNombreProducto($selected_station['petrolera_id'], $idproducto);
-                            if (empty($nombre_producto)) continue;
+                            // Nombre del producto = etiqueta de la línea (linea/lama) del cartel.
+                            $nombre_producto = trim((string)($cartel_activo['lama'.$i] ?? ''));
+                            if ($nombre_producto === '') continue;
 
                             $productos_mostrados++;
                         ?>

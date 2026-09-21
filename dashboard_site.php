@@ -100,15 +100,14 @@ $refresh_url = "?cartel_id=" . $cartel_activo['id'];
             <div class="card-header"><h5 class="mb-0"><i class="bi bi-calculator me-2"></i> Precios actuales</h5></div>
             <div class="card-body p-0">
                 <div class="price-list">
-                    <?php 
+                    <?php
                     $productos_mostrados = 0;
                     for ($i = 1; $i <= 5; $i++):
-                        $idproducto = $cartel_activo['idproducto'.$i] ?? null;
-                        if (empty($idproducto)) continue;
-                        
-                        $nombre_producto = obtenerNombreProducto($petrolera_id, $idproducto);
-                        if (empty($nombre_producto)) continue;
-                        
+                        // Se usa la etiqueta de la línea (lama = linea del cartel) como nombre
+                        // del producto, con su precio. Las líneas sin etiqueta se omiten.
+                        $nombre_producto = trim((string)($cartel_activo['lama'.$i] ?? ''));
+                        if ($nombre_producto === '') continue;
+
                         $precio = $cartel_activo['precio'.$i] ?? 0;
                         $precio_formateado = formatearPrecio($precio);
                         if ($precio == 0) $precio_formateado = '000,0';

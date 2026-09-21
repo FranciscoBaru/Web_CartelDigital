@@ -145,6 +145,7 @@ $sql_all = "SELECT s.site, s.nombre, s.domicilio, s.localidad, s.provincia, s.te
                s.Fecha, s.hora,
                c.mac, c.ip_lan, c.est_485 AS estado485, c.est_cont AS estadovox,
                c.price1 AS precio1, c.price2 AS precio2, c.price3 AS precio3, c.price4 AS precio4, c.price5 AS precio5,
+               c.linea1 AS lama1, c.linea2 AS lama2, c.linea3 AS lama3, c.linea4 AS lama4, c.linea5 AS lama5,
                c.idproducto1, c.idproducto2, c.idproducto3, c.idproducto4, c.idproducto5,
                to_char(c.updated_at, 'YYYY-MM-DD HH24:MI:SS') as ultima_actualizacion
         FROM sites s
@@ -468,13 +469,12 @@ $refresh_url = '?' . http_build_query($query_params);
                             </button>
                         </div>
                         <div class="price-list">
-                            <?php 
+                            <?php
                             $productos_mostrados = 0;
                             for ($i = 1; $i <= 5; $i++):
-                                $idproducto = $cartel_activo['idproducto'.$i] ?? null;
-                                if (empty($idproducto)) continue;
-                                $nombre_producto = obtenerNombreProducto($selected_station['petrolera_id'], $idproducto);
-                                if (empty($nombre_producto)) continue;
+                                // Nombre del producto = etiqueta de la línea (linea/lama) del cartel.
+                                $nombre_producto = trim((string)($cartel_activo['lama'.$i] ?? ''));
+                                if ($nombre_producto === '') continue;
                                 $precio = $cartel_activo['precio'.$i] ?? 0;
                                 $productos_mostrados++;
                             ?>
